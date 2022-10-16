@@ -110,7 +110,7 @@ class SimpleDLA(nn.Module):
         out = self.layer4(out)
         out = self.layer5(out)
         out = self.layer6(out)
-        out = F.avg_pool2d(out, 4)
+        out = F.avg_pool2d(out, 16)
         out = out.view(out.size(0), -1)
         out = self.linear(out)
         return out
@@ -119,7 +119,7 @@ class SimpleDLA(nn.Module):
 def test():
     net = SimpleDLA()
     print(net)
-    x = torch.randn(1, 3, 32, 32)
+    x = torch.randn(1, 3, 128, 128)
     y = net(x)
     print(y.size())
 

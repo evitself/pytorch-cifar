@@ -66,8 +66,10 @@ class PreActResNet(nn.Module):
     def __init__(self, block, num_blocks, num_classes=10):
         super(PreActResNet, self).__init__()
         self.in_planes = 64
-
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(3, self.in_planes, kernel_size=7, stride=2, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(self.in_planes)
+        self.relu1 = nn.ReLU(inplace=True)
+        self.maxpool1 = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
         self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
         self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
@@ -83,25 +85,30 @@ class PreActResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        out = self.conv1(x)
+        out = self.conv1(x) # downsample 2x
+        out = self.bn1(out)
+        out = self.relu1(out)
+        out = self.maxpool1(out) # downsample 2x
         out = self.layer1(out)
-        out = self.layer2(out)
-        out = self.layer3(out)
-        out = self.layer4(out)
-        out = F.avg_pool2d(out, 4)
-        out = out.view(out.size(0), -1)
+        out = self.layer2(out) # downsample 2x
+        out = self.layer3(out) # downsample 2x
+        out = self.layer4(out) # downsample 2x
+        # out = F.avg_pool2d(out, 2)
+        # out = out.view(out.size(0), -1)
+        out = F.adaptive_avg_pool2d(out, (1, 1)) # adaptive avgpool 2d, always squeeze feature map to Cx1x1
+        out = torch.flatten(out, 1)
         out = self.linear(out)
         return out
 
 
-def PreActResNet18():
-    return PreActResNet(PreActBlock, [2,2,2,2])
+def PreActResNet18(num_classes=10):
+    return PreActResNet(PreActBlock, [2,2,2,2], num_classes=num_classes)
 
 def PreActResNet34():
     return PreActResNet(PreActBlock, [3,4,6,3])
 
-def PreActResNet50():
-    return PreActResNet(PreActBottleneck, [3,4,6,3])
+def PreActResNet50(num_classes=10):
+    return PreActResNet(PreActBottleneck, [3,4,6,3], num_classes=num_classes)
 
 def PreActResNet101():
     return PreActResNet(PreActBottleneck, [3,4,23,3])

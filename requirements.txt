@@ -1,0 +1,1 @@
+openvino-dev[ONNX,pytorch]==2022.2.0

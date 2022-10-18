@@ -22,16 +22,19 @@ from scheduler.cosine_annealing_lr_with_warmup import CosineAnnealingWarmupResta
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
-parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
+parser.add_argument('--lr', default=0.1, type=float, 
+                    help='learning rate')
 parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
+parser.add_argument('--amp', '-m', action='store_true',
+                    help='enable auto-mix-precision training')
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
-scaler = GradScaler()
+scaler = GradScaler() if args.amp else None
 
 class AddGaussianNoise(object):
     def __init__(self, mean=0., std=1.):
@@ -69,7 +72,9 @@ transform_test = transforms.Compose([
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
 
-class_weights = torch.FloatTensor([0.285, 0.715]).cuda()
+class_weights = torch.FloatTensor([0.285, 0.715])
+if device == 'cuda':
+    class_weights = class_weights.cuda()
 # train_sampler = torch.utils.data.sampler.WeightedRandomSampler(class_weights, 32)
 
 custom_data = torchvision.datasets.ImageFolder(
@@ -132,9 +137,9 @@ criterion = nn.CrossEntropyLoss(weight=class_weights)
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=0.9, weight_decay=5e-4)
 # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=TOTAL_EPOCH)
-scheduler = CosineAnnealingWarmupRestarts(optimizer, max_lr=0.01, min_lr=0.0001, 
+scheduler = CosineAnnealingWarmupRestarts(optimizer, max_lr=args.lr, min_lr=args.lr*0.001,
                                           first_cycle_steps=50, cycle_mult=1.0,
-                                          warmup_steps=10, gamma=0.5)
+                                          warmup_steps=10, gamma=0.2)
 
 # Training
 def train(epoch):
@@ -148,13 +153,17 @@ def train(epoch):
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
 
-        with autocast():
+        if args.amp:
+            with autocast():
+                outputs = net(inputs)
+                loss = criterion(outputs, targets)
+            loss = scaler.scale(loss)
+            scaler.step(optimizer)            
+        else:
             outputs = net(inputs)
             loss = criterion(outputs, targets)
-        loss = scaler.scale(loss)
-        loss.backward()
-        # optimizer.step()
-        scaler.step(optimizer)
+            loss.backward()
+            optimizer.step()
 
         train_loss += loss.item()
         _, predicted = outputs.max(1)
@@ -168,7 +177,8 @@ def train(epoch):
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d) | LR: %f'
                      % (train_loss/(batch_idx+1), 100.*cur_acc, correct, total, cur_lr[0]))
 
-        scaler.update()
+        if args.amp:
+            scaler.update()
 
 def test(epoch):
     global best_acc
